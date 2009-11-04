@@ -2,7 +2,7 @@
 # coding: utf-8
 from django.core.management.base import BaseCommand, CommandError
 from djzen.models import *
-
+from time import time
 from django.db import settings
 import zenapi
 
@@ -23,7 +23,9 @@ def addusers(*users):
         except User.DoesNotExist:
             user = User(LoginName=u)
             print 'Adding', user.LoginName
-        user.update()
+        t0 = time()
+        user.update(updateChildren=True)
         user.save()
         print 'Success!!!'
+        print 'Time elapsed: %s seconds'%(time()-t0)
         

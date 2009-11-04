@@ -1,12 +1,50 @@
 from django.db import models
 import zenapi
-
+#from django.utils.safestring import mark_safe
 # Create your models here.
 
 setByZen = dict(editable=False, null=True, blank=True)
 
+# Helper class
+class Enum(object):
+    def __init__(self, **kwargs):
+        self.__dict = {}
+        for k,v in kwargs.items():
+            self.__dict[k]=v
+            setattr(self, k, self._getter(k))
+            
+    def __call__(self, typename):
+        return self.__dict[typename]
+    
+    def _getter(self, attr):
+        def get(self):
+            return self.__dict[attr]
+        return property(get)
+    @property
+    def choices(self):
+        l = []
+        for k,v in self.__dict.items():
+            l.append((v, k))
+        return tuple(l)
+    
 # Models
-class User(models.Model):
+class ZenModel(models.Model):
+    class Meta:
+        abstract=True
+        
+    def _sync(self, synckwds, obj):
+        
+        for k in synckwds:
+            if '_' in k:
+                continue
+            v = getattr(obj, k, None)
+            if isinstance(v, zenapi.DateTime):
+                v = v.Value
+            if v is not None:
+                setattr(self, k, v)
+        self.save()
+        
+class User(ZenModel):
     """Model the Zenfolio user from which to snag photos"""
     #_id = models.IntegerField(primary_key=True, db_index=True)
     
@@ -35,9 +73,9 @@ class User(models.Model):
     # go off Id's here and in other places
     #RecentPhotoSets = models.ManyToManyField('PhotoSet') #not right
     #FeaturedPhotoSets = models.ManyToManyField('PhotoSet')
-    #RootGroup = models.ForeignKey('Group', **setByZen)
-
-    RootGroup = models.IntegerField(**setByZen) # Id of root group
+    
+    RootGroup = models.ForeignKey('Group', **setByZen)
+    #RootGroup = models.IntegerField(**setByZen) # Id of root group
     
     DomainName = models.CharField(max_length=100, **setByZen)
     """
@@ -71,27 +109,66 @@ class User(models.Model):
     }
     """
     
-    def update(self):
+    def update(self, updateChildren=False):
         ro = self.getConnection().LoadPublicProfile()
-        for k in self.__dict__:
-            try:
-                v = ro._dict[k]
-                if hasattr(v, 'Id'):
-                    v = v.Id
-                elif hasattr(v, 'Value'):
-                    v = v.Value
-                setattr(self, k, v)
-            except KeyError:
-                pass
-    
+        synckeys = self.__dict__.keys()
+        #synckeys.remove('RootGroup_id')
+        
+        self._sync(synckeys, ro)
+        
+        try:
+            self.RootGroup = Group.objects.get(Id=ro.RootGroup.Id)
+        except Group.DoesNotExist:
+            self.RootGroup = Group(Id=ro.RootGroup.Id, Owner=self)
+        if updateChildren:
+            self.RootGroup.update(groupResponse=self.getConnection().LoadGroupHierarchy(),
+                                  updateChildren=updateChildren)
+        self.save()
+        
     def getConnection(self):
         return zenapi.ZenConnection(username=self.LoginName)
     
-class GroupElement(models.Model):
+class GalleryElement(ZenModel):
+    """Abstract base for all photos, photosets, and groups
+    
+    Note that the API doesn't contain this object, but the hierarchy's better
+    this way
+    """
+    Id = models.IntegerField(primary_key=True, db_index=True, **setByZen)
+    Title = models.CharField(max_length=100, **setByZen)
+    #AccessDescriptor
+    Caption = models.CharField(max_length=100, **setByZen)
+    PageUrl = models.URLField(**setByZen)
+    
+    class Meta:
+        abstract=True
+        
+    def __unicode__(self):
+        t = self.Title
+        if not t:
+            t = self.Caption
+        if not t:
+            t = self.__class__.__name__
+        return t
+    
+    def zenlink(self):
+        return '<a href="%s">%s</a>'%(self.PageUrl, self.PageUrl)
+    zenlink.allow_tags=True
+    
+    def zenthumb(self):
+        return 
+    @property
+    def titlelink(self):
+        return '<a href="%s">%s</a>'%(self.PageUrl, self.Title)
+    #titlelink.allow_tags=True
+    
+class GroupElement(GalleryElement):
     """Abstract base for photosets and groups"""
-    GroupIndex = models.IntegerField(primary_key=True, db_index=True, **setByZen)
-    Title = models.CharField(max_length=60, **setByZen)
-    Owner = models.ForeignKey(User, **setByZen)
+    GroupIndex = models.IntegerField(**setByZen)
+    
+    CreatedOn = models.DateTimeField(**setByZen)#switch from api
+    ModifiedOn = models.DateTimeField(**setByZen)
+    
     """
     GroupElement
     {
@@ -106,14 +183,17 @@ class GroupElement(models.Model):
         
 class Group(GroupElement):
     """Folder-like collection of groups and photosets"""
-    Caption = models.CharField(max_length=100, **setByZen)
-    CreatedOn = models.DateTimeField(**setByZen)
-    ModifiedOn = models.DateTimeField(**setByZen)
     
     #ParentGroups = models.ManyToManyField('self', related_name='GroupElements',
                                           #symmetrical=False) # in GroupElements
-    #GroupElements = models.ManyToManyField(GroupElement)
-    PageUrl = models.URLField()
+                                          
+                                          
+    Owner = models.ForeignKey(User, **setByZen)
+    # Break API (from Elements) since we can't mix two classes in relations
+    GroupElements = models.ManyToManyField('self', related_name='ParentGroups',**setByZen)
+    PhotoSetElements = models.ManyToManyField('PhotoSet', related_name='ParentGroups', **setByZen)
+    # better separation this way anyways ;)
+    
     """
     Group : GroupElement
     {
@@ -129,16 +209,66 @@ class Group(GroupElement):
         #string PageUrl          // new in version v1.1
     }
     """
-    
+    def _addPhotoSet(self, ps, updateChildren=False):
+        try:
+            p = PhotoSet.objects.get(Id=ps.Id)
+        except PhotoSet.DoesNotExist:
+            p = PhotoSet(Id=ps.Id, Owner=self.Owner)
+        if updateChildren:
+            p.update(psResponse=ps, updateChildren=updateChildren)
+        try:
+            self.PhotoSetElements.get(Id=p.Id)
+        except PhotoSet.DoesNotExist:
+            self.PhotoSetElements.add(p)
+            
+    def _addGroup(self, gp, updateChildren=False):
+        try:
+            g = Group.objects.get(Id=gp.Id)
+        except Group.DoesNotExist:
+            g = Group(Id=gp.Id, Owner=self.Owner)
+        if updateChildren:
+            g.update(groupResponse=gp, updateChildren=updateChildren)
+        try:
+            self.GroupElements.get(Id=g.Id)
+        except Group.DoesNotExist:
+            self.GroupElements.add(g)
+            
+    def update(self, groupResponse=None, updateChildren=False):
+        # Gets new info
+        g = groupResponse
+        if g is None:
+            g = self.Owner.getConnection().LoadGroup(self.Id)
+        assert g.Id == self.Id
+        synckwds = self.__dict__.keys()
+        
+        #synckwds.remove('Owner_id')
+        
+        #synckwds.pop('ParentGroups_id')
+        #synckwds.pop('GroupElements_id')
+        #synckwds.pop('PhotoSetElements_id')
+        # The rest
+        self._sync(synckwds, g)
+        
+        # Updates owner
+        try:        
+            owner=User.objects.get(LoginName=g.Owner)
+        except User.DoesNotExist:
+            owner=User(LoginName=g.Owner)
+            owner.save()
+        self.Owner = owner
+        # Updates elements
+        [self._addGroup(gp, updateChildren=updateChildren) for gp in g.Elements if isinstance(gp, zenapi.Group)]
+        [self._addPhotoSet(ps, updateChildren=updateChildren) for ps in g.Elements if isinstance(ps, zenapi.PhotoSet)]
+        
+        self.save()
+        
 class PhotoSet(GroupElement):
     """Collection of photos"""
-    Caption = models.CharField(max_length=100, **setByZen)
-    CreatedOn = models.DateTimeField(**setByZen)
-    ModifiedOn = models.DateTimeField(**setByZen)
-    Type = models.IntegerField(**setByZen) # Enum will be gallery or collection
-
+    PhotoSetTypes=Enum(Gallery=0, Collection=1) # not fully working yet
+    Owner = models.ForeignKey(User, **setByZen)
+    Type = models.IntegerField(choices=PhotoSetTypes.choices, **setByZen) # Enum will be gallery or collection
     TitlePhoto = models.ForeignKey('Photo', **setByZen)
-    PageUrl = models.URLField(**setByZen)
+    
     """
     PhotoSet : GroupElement
     {
@@ -160,23 +290,79 @@ class PhotoSet(GroupElement):
         string PageUrl                  // new in version 1.1
     }
     """
+    def update(self, psResponse=None, updateChildren=False):
+        ps = None # Must load photos = psResponse
+        if ps is None:
+            ps = self.Owner.getConnection().LoadPhotoSet(self.Id)
+        assert self.Id == ps.Id
+        synckwds = self.__dict__.keys()
+        #synckwds.pop('ParentGroups_id')
+        #synckwds.pop('Keywords_id')
+        #synckwds.pop('Categories_id')
+        
+        #synckwds.pop('Photos_id')
+        synckwds.remove('Type')
+        self.Type = self.PhotoSetTypes(ps.Type)
+        # The rest
+        self._sync(synckwds, ps)
+        try:
+            owner=User.objects.get(LoginName=ps.Owner)
+        except User.DoesNotExist:
+            owner=User(LoginName=ps.Owner)
+            owner.save()
+        self.Owner = owner
+        [self._addPhoto(p, updateChildren=updateChildren) for p in ps.Photos]
+        self.save()
     
-class Photo(models.Model):
-    Id = models.IntegerField(primary_key=True, db_index=True, **setByZen)
+    def _addPhoto(self, photo, updateChildren=False):
+        try:
+            p = Photo.objects.get(Id=photo.Id)
+        except Photo.DoesNotExist:
+            p = Photo(Id=photo.Id, Owner=self.Owner)
+        if updateChildren:
+            p.update(photoResponse=photo, gallery=self)
+        try:
+            self.Photos.get(Id=p.Id)
+        except Photo.DoesNotExist:
+            self.Photos.add(p)
     
-    Title = models.CharField(max_length=100, **setByZen)
-    Caption = models.CharField(max_length=100, **setByZen)
+class Photo(GroupElement):
     FileName = models.CharField(max_length=100, **setByZen)
     
     UploadedOn = models.DateTimeField(**setByZen)
     TakenOn = models.DateTimeField(**setByZen)
     
-    Owner = models.ForeignKey(User, **setByZen)
     Gallery = models.ForeignKey(PhotoSet, related_name='Photos', **setByZen)
     
+    Owner = models.ForeignKey(User, **setByZen)
     OriginalUrl = models.URLField(**setByZen)
     UrlCore = models.URLField(**setByZen)
-    PageUrl = models.URLField(**setByZen)
+    
+    ImageSize = Enum(Original = None,
+                     
+    
+                     ThumbRegular = 0,
+                     ThumbSquare = 1,
+                     ThumbLarge = 10,
+                     ImSmall = 2,
+                     ImMed = 3,
+                     ImLarge = 4,
+                     ImXLarge = 5,
+    
+                     ProfileLarge = 50,
+                     ProfileSmall = 51,
+                     ProfileRegular = 52,
+                     )
+    
+    def imageUrl(self, size=None):
+        """Calculates the url to any of the resized versions
+        See: http://www.zenfolio.com/zf/help/api/guide/download
+        Could add port and seq # here, ignoring for now
+        """
+        if size is None:
+            return self.OriginalUrl
+        
+        return "http://www.zenfolio.com%s-%s.jpg"%(self.UrlCore, size)
     """Photo
     {
         #int Id,
@@ -205,3 +391,38 @@ class Photo(models.Model):
         #string PageUrl              // new in version 1.1
     }
     """
+    
+    def update(self, photoResponse=None, gallery=None):
+        p=photoResponse
+        if p is None:
+            p = self.Owner.getConnection().LoadPhoto(self.Id)
+        assert p.Id == self.Id
+        synckwds = self.__dict__.keys()
+        #synckwds.remove('Categories_id')
+        #synckwds.pop('Keywords_id')
+        #synckwds.pop('Gallery_id')
+        self._sync(synckwds, p)
+        try:
+            owner=User.objects.get(LoginName=p.Owner)
+        except User.DoesNotExist:
+            owner=User(LoginName=p.Owner)
+            owner.save()
+        self.Owner = owner
+        
+        # Note that p.Gallery is int, not object
+        try:
+            if gallery is None:
+                gallery=PhotoSet.objects.get(Id=p.Gallery)
+            if gallery.Id == p.Gallery:
+                self.Gallery=gallery # Else it's a collection
+                
+        except PhotoSet.DoesNotExist:
+            raise NotImplementedError()# Updates currently only go downwards,
+        #whereas this would have to go up the tree then back down
+            
+        self.save()
+        
+    def adminthumb(self):
+        return '<a href="%s"><img src="%s"></a>'%(self.imageUrl(3),
+                                                  self.imageUrl(1))
+    adminthumb.allow_tags=True

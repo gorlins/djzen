@@ -7,14 +7,18 @@ from models import *
 class UserAdmin(admin.ModelAdmin):
     list_display=('LoginName', 'DisplayName', 'DomainName')
     
-#class GalleryAdmin(admin.ModelAdmin):
-    #list_display = ('title', 'date_added', 'photo_count', 'is_public')
+class GroupAdmin(admin.ModelAdmin):
+    list_display = ('Title', 'zenlink', 'Owner')
     #list_filter = ['date_added', 'is_public']
     #search_fields = ['title', 'description']
     #date_hierarchy = 'date_added'
     #prepopulated_fields = {'title_slug': ('title',)}
     ##filter_horizontal = ('photos',)
-
+class PhotoSetAdmin(admin.ModelAdmin):
+    list_display = ('Title', 'Type', 'zenlink', 'Owner')
+    
+class PhotoAdmin(admin.ModelAdmin):
+    list_display = ('Title', 'adminthumb', 'FileName', 'Gallery', 'TakenOn', 'zenlink', 'Owner')
 #class FolderAdmin(admin.ModelAdmin):
     #list_display = ('foldername', 'admin_thumb', 'title', 'date_added', 'photo_count', 'is_public')
     #list_filter = ['date_added', 'is_public', 'parent']
@@ -42,6 +46,6 @@ class UserAdmin(admin.ModelAdmin):
     ##filter_horizontal = ('public_galleries',)
 
 admin.site.register(User, UserAdmin)
-#admin.site.register(Group, GroupAdmin)
-#admin.site.register(PhotoSet, PhotoSetAdmin)
-#admin.site.register(Photo, PhotoAdmin)
+admin.site.register(Group, GroupAdmin)
+admin.site.register(PhotoSet, PhotoSetAdmin)
+admin.site.register(Photo, PhotoAdmin)
