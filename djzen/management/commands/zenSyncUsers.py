@@ -6,6 +6,12 @@ from time import time
 from django.db import settings
 import zenapi
 
+"""Adds or syncs a Zenfolio user with the database
+
+Note that this may take awhile the first time it's called, but will be faster
+on subsequent calls (as select_related comes in useful), but it will load
+practically the entire database into memory..."""
+
 class Command(BaseCommand):
     help = ('Updates exif information for all photos.')
 
@@ -13,14 +19,15 @@ class Command(BaseCommand):
     can_import_settings = True
 
     def handle(self, *args, **options):
-        return addusers(*args)#(args, options)
+        return syncusers(*args)#(args, options)
 
-def addusers(*users):
+def syncusers(*users):
     for u in users:
         try:
-            user = User.objects.get(LoginName=u)
+            # Can't call get cause need QuerySet for select_related???
+            user = User.objects.filter(LoginName=u).select_related()[0]
             print 'Updating', user.LoginName
-        except User.DoesNotExist:
+        except IndexError:
             user = User(LoginName=u)
             print 'Adding', user.LoginName
         t0 = time()

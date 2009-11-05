@@ -9,6 +9,7 @@ class UserAdmin(admin.ModelAdmin):
     
 class GroupAdmin(admin.ModelAdmin):
     list_display = ('Title', 'zenlink', 'Owner')
+    list_filter=['Owner', 'CreatedOn']
     #list_filter = ['date_added', 'is_public']
     #search_fields = ['title', 'description']
     #date_hierarchy = 'date_added'
@@ -16,12 +17,13 @@ class GroupAdmin(admin.ModelAdmin):
     ##filter_horizontal = ('photos',)
 class PhotoSetAdmin(admin.ModelAdmin):
     list_display = ('Title', 'Type', 'zenlink', 'Owner')
+    list_filter=['Type', 'Owner', 'CreatedOn']
     
 class PhotoAdmin(admin.ModelAdmin):
     list_display = ('Title', 'adminthumb', 'FileName', 'Gallery', 'TakenOn', 'zenlink', 'Owner')
 #class FolderAdmin(admin.ModelAdmin):
     #list_display = ('foldername', 'admin_thumb', 'title', 'date_added', 'photo_count', 'is_public')
-    #list_filter = ['date_added', 'is_public', 'parent']
+    list_filter = ['TakenOn', 'Owner', 'Gallery']
     #search_fields = ['title', 'description', 'foldername']
     #date_hierarchy = 'date_added'
     #prepopulated_fields = {'slug': ('foldername',)}

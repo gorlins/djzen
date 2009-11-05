@@ -38,7 +38,7 @@ class ZenModel(models.Model):
             if '_' in k:
                 continue
             v = getattr(obj, k, None)
-            if isinstance(v, zenapi.DateTime):
+            if isinstance(v, zenapi._zapi.DateTime):
                 v = v.Value
             if v is not None:
                 setattr(self, k, v)
@@ -108,9 +108,12 @@ class User(ZenModel):
         long PhotoBytesQuota
     }
     """
+    def __unicode__(self):
+        return self.LoginName
     
     def update(self, updateChildren=False):
-        ro = self.getConnection().LoadPublicProfile()
+        zc = self.getConnection()
+        ro = zc.LoadPublicProfile()
         synckeys = self.__dict__.keys()
         #synckeys.remove('RootGroup_id')
         
@@ -121,8 +124,9 @@ class User(ZenModel):
         except Group.DoesNotExist:
             self.RootGroup = Group(Id=ro.RootGroup.Id, Owner=self)
         if updateChildren:
-            self.RootGroup.update(groupResponse=self.getConnection().LoadGroupHierarchy(),
-                                  updateChildren=updateChildren)
+            self.RootGroup.update(groupResponse=zc.loadFullGroupHierarchy(),
+                                  updateChildren=updateChildren,
+                                  fullyLoaded=True)
         self.save()
         
     def getConnection(self):
@@ -209,35 +213,47 @@ class Group(GroupElement):
         #string PageUrl          // new in version v1.1
     }
     """
-    def _addPhotoSet(self, ps, updateChildren=False):
+    def _addPhotoSet(self, ps, updateChildren=False, fullyLoaded=False):
         try:
             p = PhotoSet.objects.get(Id=ps.Id)
         except PhotoSet.DoesNotExist:
             p = PhotoSet(Id=ps.Id, Owner=self.Owner)
         if updateChildren:
-            p.update(psResponse=ps, updateChildren=updateChildren)
-        try:
-            self.PhotoSetElements.get(Id=p.Id)
-        except PhotoSet.DoesNotExist:
-            self.PhotoSetElements.add(p)
+            p.update(psResponse=ps, 
+                     updateChildren=updateChildren,
+                     fullyLoaded=fullyLoaded)
+        #try:
+            #self.PhotoSetElements.get(Id=p.Id)
+        #except PhotoSet.DoesNotExist:
+        self.PhotoSetElements.add(p)
             
-    def _addGroup(self, gp, updateChildren=False):
+    def _addGroup(self, gp, updateChildren=False, fullyLoaded=False):
         try:
             g = Group.objects.get(Id=gp.Id)
         except Group.DoesNotExist:
             g = Group(Id=gp.Id, Owner=self.Owner)
         if updateChildren:
-            g.update(groupResponse=gp, updateChildren=updateChildren)
-        try:
-            self.GroupElements.get(Id=g.Id)
-        except Group.DoesNotExist:
-            self.GroupElements.add(g)
+            g.update(groupResponse=gp, updateChildren=updateChildren,
+                     fullyLoaded=fullyLoaded)
+        #try:
+            #self.GroupElements.get(Id=g.Id)
+        #except Group.DoesNotExist:
+        self.GroupElements.add(g)
             
-    def update(self, groupResponse=None, updateChildren=False):
+    def update(self, groupResponse=None, updateChildren=False, 
+               fullyLoaded=False):
+        """Updates a group from Zenfolio
+        
+        groupResponse: preloaded response data from Zen
+        fullyLoaded: whether groupResponse contains loaded photos (via
+            LoadPhoto or LoadPhotoset)
+        updateChildren: whether to recurse and load data for children as well
+        """
         # Gets new info
         g = groupResponse
+        zc = self.Owner.getConnection()
         if g is None:
-            g = self.Owner.getConnection().LoadGroup(self.Id)
+            g = zc.LoadGroup(self.Id)
         assert g.Id == self.Id
         synckwds = self.__dict__.keys()
         
@@ -250,15 +266,29 @@ class Group(GroupElement):
         self._sync(synckwds, g)
         
         # Updates owner
-        try:        
-            owner=User.objects.get(LoginName=g.Owner)
-        except User.DoesNotExist:
-            owner=User(LoginName=g.Owner)
-            owner.save()
-        self.Owner = owner
+        if self.Owner is None or self.Owner.LoginName != g.Owner:
+            try:        
+                owner=User.objects.get(LoginName=g.Owner)
+            except User.DoesNotExist:
+                owner=User(LoginName=g.Owner)
+                owner.save()
+            self.Owner = owner
+            
         # Updates elements
-        [self._addGroup(gp, updateChildren=updateChildren) for gp in g.Elements if isinstance(gp, zenapi.Group)]
-        [self._addPhotoSet(ps, updateChildren=updateChildren) for ps in g.Elements if isinstance(ps, zenapi.PhotoSet)]
+        groups = [gp for gp in g.Elements if isinstance(gp, zenapi.snapshots.Group)]
+        psets = [ps for ps in g.Elements if isinstance(ps, zenapi.snapshots.PhotoSet)]
+        if not fullyLoaded and updateChildren: 
+            # Even if not fullyLoaded, we may have group info from LoadHierarchy
+            groups = zc.map(zc.LoadGroup, groups)
+            psets = zc.map(zc.LoadPhotoSet, psets)
+        if len(groups):
+            [self._addGroup(gp, 
+                            updateChildren=updateChildren,
+                            fullyLoaded=fullyLoaded) for gp in groups]
+        if len(psets):
+            [self._addPhotoSet(ps,
+                               updateChildren=updateChildren,
+                               fullyLoaded=fullyLoaded) for ps in psets]
         
         self.save()
         
@@ -290,10 +320,11 @@ class PhotoSet(GroupElement):
         string PageUrl                  // new in version 1.1
     }
     """
-    def update(self, psResponse=None, updateChildren=False):
+    def update(self, psResponse=None, updateChildren=False, fullyLoaded=False):
         ps = None # Must load photos = psResponse
+        zc = self.Owner.getConnection()
         if ps is None:
-            ps = self.Owner.getConnection().LoadPhotoSet(self.Id)
+            ps = zc.LoadPhotoSet(self.Id)
         assert self.Id == ps.Id
         synckwds = self.__dict__.keys()
         #synckwds.pop('ParentGroups_id')
@@ -305,13 +336,22 @@ class PhotoSet(GroupElement):
         self.Type = self.PhotoSetTypes(ps.Type)
         # The rest
         self._sync(synckwds, ps)
-        try:
-            owner=User.objects.get(LoginName=ps.Owner)
-        except User.DoesNotExist:
-            owner=User(LoginName=ps.Owner)
-            owner.save()
-        self.Owner = owner
-        [self._addPhoto(p, updateChildren=updateChildren) for p in ps.Photos]
+
+        if self.Owner is None or self.Owner.LoginName != ps.Owner:
+            try:
+                owner=User.objects.get(LoginName=ps.Owner)
+            except User.DoesNotExist:
+                owner=User(LoginName=ps.Owner)
+                owner.save()
+            self.Owner = owner
+            
+        if len(ps.Photos):
+            if updateChildren and not fullyLoaded:
+                photos = zc.map(zc.LoadPhoto, ps.Photos)
+            else:
+                photos = ps.Photos
+            [self._addPhoto(p, updateChildren=updateChildren) for p in photos]
+            
         self.save()
     
     def _addPhoto(self, photo, updateChildren=False):
@@ -321,10 +361,10 @@ class PhotoSet(GroupElement):
             p = Photo(Id=photo.Id, Owner=self.Owner)
         if updateChildren:
             p.update(photoResponse=photo, gallery=self)
-        try:
-            self.Photos.get(Id=p.Id)
-        except Photo.DoesNotExist:
-            self.Photos.add(p)
+        #try:
+        #self.Photos.get(Id=p.Id)
+        #except Photo.DoesNotExist:
+        self.Photos.add(p)
     
 class Photo(GroupElement):
     FileName = models.CharField(max_length=100, **setByZen)
@@ -392,6 +432,9 @@ class Photo(GroupElement):
     }
     """
     
+    def __unicode__(self):
+        return self.FileName
+    
     def update(self, photoResponse=None, gallery=None):
         p=photoResponse
         if p is None:
@@ -402,22 +445,25 @@ class Photo(GroupElement):
         #synckwds.pop('Keywords_id')
         #synckwds.pop('Gallery_id')
         self._sync(synckwds, p)
-        try:
-            owner=User.objects.get(LoginName=p.Owner)
-        except User.DoesNotExist:
-            owner=User(LoginName=p.Owner)
-            owner.save()
-        self.Owner = owner
+        
+        if self.Owner is None or self.Owner.LoginName != p.Owner:
+            try:
+                owner=User.objects.get(LoginName=p.Owner)
+            except User.DoesNotExist:
+                owner=User(LoginName=p.Owner)
+                owner.save()
+            self.Owner = owner
         
         # Note that p.Gallery is int, not object
-        try:
-            if gallery is None:
-                gallery=PhotoSet.objects.get(Id=p.Gallery)
-            if gallery.Id == p.Gallery:
-                self.Gallery=gallery # Else it's a collection
-                
-        except PhotoSet.DoesNotExist:
-            raise NotImplementedError()# Updates currently only go downwards,
+        if self.Gallery is None or self.Gallery.Id != p.Gallery:
+            try:
+                if gallery is None:
+                    gallery=PhotoSet.objects.get(Id=p.Gallery)
+                if gallery.Id == p.Gallery:
+                    self.Gallery=gallery # Else it's a collection
+                    
+            except PhotoSet.DoesNotExist:
+                raise NotImplementedError()# Updates currently only go downwards,
         #whereas this would have to go up the tree then back down
             
         self.save()
