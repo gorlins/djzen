@@ -1,0 +1,12 @@
+{% extends "djzen/root.html" %}
+
+{% load djzen_tags %}
+
+{% block djcontent %}
+<div align="center">
+    {% for photo in object.Photos.all %}
+    <div style="align:center; padding:5px; width:120px; height:120px; float:left; display:block; margins:0px>"><table border=0px style="position:relative; left:0px; top:0px; width:120px; height:120px; vertical-align:middle;"><tr><td align="center" ><a href="{{ photo.get_absolute_url }}" title="{{ photo.Title }}"><img border=0px src="{{ photo.thumb_lrg}}"/></a></td></tr></table></div>
+    {% endfor %}
+    <div style="clear:both;"><br/></div>
+</div>
+{% endblock %}

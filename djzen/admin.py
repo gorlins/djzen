@@ -2,7 +2,7 @@
 
 """
 from django.contrib import admin
-from .models import *
+from models import *
 
 class UserAdmin(admin.ModelAdmin):
     list_display=('LoginName', 'DisplayName', 'DomainName')
@@ -15,14 +15,14 @@ class GroupAdmin(admin.ModelAdmin):
     #date_hierarchy = 'date_added'
     #prepopulated_fields = {'title_slug': ('title',)}
     ##filter_horizontal = ('photos',)
+    
 class PhotoSetAdmin(admin.ModelAdmin):
-    list_display = ('Title', 'Type', 'zenlink', 'Owner')
+    list_display = ('Title', 'adminthumb', 'Type', 'zenlink', 'Owner')
     list_filter=['Type', 'Owner', 'CreatedOn']
     
 class PhotoAdmin(admin.ModelAdmin):
-    list_display = ('Title', 'adminthumb', 'FileName', 'Gallery', 'TakenOn', 'zenlink', 'Owner')
-#class FolderAdmin(admin.ModelAdmin):
-    #list_display = ('foldername', 'admin_thumb', 'title', 'date_added', 'photo_count', 'is_public')
+    list_display = ('Title', 'adminthumb', 'FileName', 'Gallery', 'TakenOn',
+                    'zenlink', 'Owner')
     list_filter = ['TakenOn', 'Owner', 'Gallery']
     #search_fields = ['title', 'description', 'foldername']
     #date_hierarchy = 'date_added'

@@ -8,7 +8,8 @@ setup(name='DjZen',
       author='Scott Gorlin',
       #author_email='',
       url='http://www.scottgorlin.com',
-      packages=['djzen', 'djzen.management', 'djzen.management.commands'],
+      packages=['djzen', 'djzen.management', 'djzen.management.commands',
+                'djzen.templatetags'],
       requires=['zenapi'],#not yet working??
       )
 

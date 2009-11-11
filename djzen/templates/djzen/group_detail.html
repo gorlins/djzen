@@ -1,0 +1,15 @@
+{% extends "djzen/root.html" %}
+
+{% load djzen_tags %}
+
+{% block djcontent %}
+<div align="center">
+    {% for group in object.GroupElements.all %}
+    <div style="float:left; display:block; padding:10px;"><a href="{{ group.get_absolute_url }}" title="{{ group.Title }}"><table border=0px style="position:relative; left:0px; top:0px; width:200px; height:200px; vertical-align:middle;"><tr><td align="center" ><img border=0px src="{{ group.TitlePhoto.thumb_xl}}"/></td></tr></table><h2>{{ group.Title }}</h2></a></div>
+    {% endfor %}
+    {% for ps in object.PhotoSetElements.all %}
+    <div style="float:left; display:block;"><a href="{{ ps.PageUrl }}" title="{{ ps.Title }}"><table border=0px style="position:relative; left:0px; top:0px; width:200px; height:200px; vertical-align:middle;"><tr><td align="center" ><img border=0px src="{{ ps.TitlePhoto.thumb_xl}}"/></td></tr></table><h2>{{ ps.Title }}</h2></a></div>
+    {% endfor %}
+    <div style="clear:both;"><br/></div>
+</div>
+{% endblock %}

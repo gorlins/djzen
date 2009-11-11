@@ -1,0 +1,12 @@
+{% extends "djzen/root.html" %}
+
+{% load djzen_tags %}
+
+
+{% block djcontent %}
+<div align="center">
+    <div style="width:580px; height:450px; margin:10px;"><a href="{{ object.img }}"><img border=0px src="{{ object.img_med }}"/></a></div>
+    <div style="margin:2px; clear:both;">{{ object.Caption }} {{ object.TakenOn|date:"l, F jS, Y" }}</i></div>
+</div>
+{% endblock %}
+

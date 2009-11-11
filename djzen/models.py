@@ -1,5 +1,8 @@
 from django.db import models
 import zenapi
+from django.core.urlresolvers import reverse
+#from django.db.models import Q
+
 #from django.utils.safestring import mark_safe
 # Create your models here.
 
@@ -11,15 +14,15 @@ class Enum(object):
         self.__dict = {}
         for k,v in kwargs.items():
             self.__dict[k]=v
-            setattr(self, k, self._getter(k))
+            setattr(self, k, v)
             
     def __call__(self, typename):
         return self.__dict[typename]
     
-    def _getter(self, attr):
-        def get(self):
-            return self.__dict[attr]
-        return property(get)
+    #def _getter(self, attr):
+        #def get(self):
+            #return self.__dict[attr]
+        #return property(instancemethod(get))
     @property
     def choices(self):
         l = []
@@ -147,6 +150,9 @@ class GalleryElement(ZenModel):
     class Meta:
         abstract=True
         
+    def get_absolute_url(self):
+        return reverse('djzen-'+self.__class__.__name__.lower(), kwargs={'object_id':self.Id})
+            
     def __unicode__(self):
         t = self.Title
         if not t:
@@ -169,9 +175,11 @@ class GalleryElement(ZenModel):
 class GroupElement(GalleryElement):
     """Abstract base for photosets and groups"""
     GroupIndex = models.IntegerField(**setByZen)
-    
+    TitlePhoto = models.ForeignKey('Photo', **setByZen) 
     CreatedOn = models.DateTimeField(**setByZen)#switch from api
     ModifiedOn = models.DateTimeField(**setByZen)
+    # Not accessable through API
+    #CustomReference = models.CharField(max_length=100, **setByZen) 
     
     """
     GroupElement
@@ -184,6 +192,13 @@ class GroupElement(GalleryElement):
     """
     class Meta:
         abstract = True
+    
+    def ancestry(self):
+        if self.ParentGroups.all():
+            # Haven't yet solved multiple inheritance
+            parent = self.ParentGroups.all()[0]
+            return parent.ancestry() + [parent]
+        return []
         
 class Group(GroupElement):
     """Folder-like collection of groups and photosets"""
@@ -194,8 +209,12 @@ class Group(GroupElement):
                                           
     Owner = models.ForeignKey(User, **setByZen)
     # Break API (from Elements) since we can't mix two classes in relations
-    GroupElements = models.ManyToManyField('self', related_name='ParentGroups',**setByZen)
-    PhotoSetElements = models.ManyToManyField('PhotoSet', related_name='ParentGroups', **setByZen)
+    GroupElements = models.ManyToManyField('self', symmetrical=False,
+                                           related_name='ParentGroups',
+                                           **setByZen)
+    PhotoSetElements = models.ManyToManyField('PhotoSet',
+                                              related_name='ParentGroups', 
+                                              **setByZen)
     # better separation this way anyways ;)
     
     """
@@ -261,7 +280,8 @@ class Group(GroupElement):
         
         #synckwds.pop('ParentGroups_id')
         #synckwds.pop('GroupElements_id')
-        #synckwds.pop('PhotoSetElements_id')
+        #synckwds.pop('PhotoSetElements_id')  
+        
         # The rest
         self._sync(synckwds, g)
         
@@ -290,6 +310,24 @@ class Group(GroupElement):
                                updateChildren=updateChildren,
                                fullyLoaded=fullyLoaded) for ps in psets]
         
+        tp = g.TitlePhoto
+        #synckwds.remove('TitlePhoto')
+        try:
+            if tp is None:
+                raise Photo.DoesNotExist
+            self.TitlePhoto=Photo.objects.get(Id=tp.Id)
+        except Photo.DoesNotExist:
+            if self.PhotoSetElements.count():
+                ps=self.PhotoSetElements.order_by('-Views')[0]
+                self.TitlePhoto = ps.TitlePhoto
+            elif self.GroupElements.count():
+                childids = [g.TitlePhoto.Id for g in self.GroupElements.all() 
+                            if not g.TitlePhoto is None]
+                ps = Photo.objects.filter(Id__in=childids)
+                ps.order_by('-Views')
+                self.TitlePhoto = ps[0]
+                
+            
         self.save()
         
 class PhotoSet(GroupElement):
@@ -297,8 +335,9 @@ class PhotoSet(GroupElement):
     PhotoSetTypes=Enum(Gallery=0, Collection=1) # not fully working yet
     Owner = models.ForeignKey(User, **setByZen)
     Type = models.IntegerField(choices=PhotoSetTypes.choices, **setByZen) # Enum will be gallery or collection
-    TitlePhoto = models.ForeignKey('Photo', **setByZen)
-    
+    Views = models.IntegerField(default=0, **setByZen)
+    # API says in PhotoSet but Groups have it too - but not accessable!!
+
     """
     PhotoSet : GroupElement
     {
@@ -334,6 +373,7 @@ class PhotoSet(GroupElement):
         #synckwds.pop('Photos_id')
         synckwds.remove('Type')
         self.Type = self.PhotoSetTypes(ps.Type)
+            
         # The rest
         self._sync(synckwds, ps)
 
@@ -352,6 +392,18 @@ class PhotoSet(GroupElement):
                 photos = ps.Photos
             [self._addPhoto(p, updateChildren=updateChildren) for p in photos]
             
+        tp = ps.TitlePhoto
+        #synckwds.remove('TitlePhoto')
+        try:
+            if tp is None:
+                raise Photo.DoesNotExist
+            self.TitlePhoto=Photo.objects.get(Id=tp.Id)
+        except Photo.DoesNotExist:
+                
+            if self.Photos.count():
+                ps=self.Photos.order_by('-Views')[0]
+                self.TitlePhoto = ps
+                
         self.save()
     
     def _addPhoto(self, photo, updateChildren=False):
@@ -365,13 +417,21 @@ class PhotoSet(GroupElement):
         #self.Photos.get(Id=p.Id)
         #except Photo.DoesNotExist:
         self.Photos.add(p)
+   
+    def adminthumb(self):
+        if self.TitlePhoto:
+            return self.TitlePhoto.adminthumb()
+        return ''
+    adminthumb.allow_tags=True
     
-class Photo(GroupElement):
+class Photo(GalleryElement):
     FileName = models.CharField(max_length=100, **setByZen)
-    
+    Height = models.IntegerField(**setByZen)
+    Width = models.IntegerField(**setByZen)
+    #Sequence = models.IntegerField(**setByZen) # Unclear what this is
     UploadedOn = models.DateTimeField(**setByZen)
     TakenOn = models.DateTimeField(**setByZen)
-    
+    Views = models.IntegerField(default=0, **setByZen)
     Gallery = models.ForeignKey(PhotoSet, related_name='Photos', **setByZen)
     
     Owner = models.ForeignKey(User, **setByZen)
@@ -384,6 +444,7 @@ class Photo(GroupElement):
                      ThumbRegular = 0,
                      ThumbSquare = 1,
                      ThumbLarge = 10,
+                     ThumbXL = 11, # Not in API, but on site
                      ImSmall = 2,
                      ImMed = 3,
                      ImLarge = 4,
@@ -401,14 +462,42 @@ class Photo(GroupElement):
         """
         if size is None:
             return self.OriginalUrl
-        
         return "http://www.zenfolio.com%s-%s.jpg"%(self.UrlCore, size)
+    
+    @property
+    def thumb_reg(self):
+        return self.imageUrl(size=Photo.ImageSize.ThumbRegular)
+    @property
+    def thumb_lrg(self):
+        return self.imageUrl(size=Photo.ImageSize.ThumbLarge)
+    @property
+    def thumb_xl(self):
+        return self.imageUrl(size=Photo.ImageSize.ThumbXL)
+    @property
+    def thumb_sqr(self):
+        return self.imageUrl(size=Photo.ImageSize.ThumbSquare)
+    @property
+    def img_sm(self):
+        return self.imageUrl(size=Photo.ImageSize.ImSmall)
+    @property
+    def img_med(self):
+        return self.imageUrl(size=Photo.ImageSize.ImMed)
+    @property
+    def img_lrg(self):
+        return self.imageUrl(size=Photo.ImageSize.ImLarge)
+    @property
+    def img_xl(self):
+        return self.imageUrl(size=Photo.ImageSize.ImXLarge)
+    @property
+    def img(self):
+        return self.imageUrl()
+    
     """Photo
     {
         #int Id,
-        uint Width,
-        uint Height,
-        string Sequence,
+        #uint Width,
+        #uint Height,
+        #string Sequence,
         AccessDescriptor AccessDescriptor,
         #string Title,
         #string Caption,
@@ -444,6 +533,8 @@ class Photo(GroupElement):
         #synckwds.remove('Categories_id')
         #synckwds.pop('Keywords_id')
         #synckwds.pop('Gallery_id')
+        #synckwds.remove('Sequence')
+        #self.Sequence=int(p.Sequence) # dunno why this is a string
         self._sync(synckwds, p)
         
         if self.Owner is None or self.Owner.LoginName != p.Owner:
@@ -472,3 +563,6 @@ class Photo(GroupElement):
         return '<a href="%s"><img src="%s"></a>'%(self.imageUrl(3),
                                                   self.imageUrl(1))
     adminthumb.allow_tags=True
+    
+    def ancestry(self):
+        return self.Gallery.ancestry() + [self.Gallery]
