@@ -5,7 +5,7 @@
 {% block djcontent %}
 <div align="center">
     {% for group in object.GroupElements.all %}
-    <div style="float:left; display:block; padding:10px;"><a href="{{ group.get_absolute_url }}" title="{{ group.Title }}"><table border=0px style="width:220px; padding:0px; margins:0px; height:220px; vertical-align:middle;"><tr><td align="center" ><img border=0px src="{{ group.TitlePhoto.thumb_xl}}"/></td></tr></table><h2>{{ group.Title }}</h2></a></div>
+    <div style="float:left; width:250px; display:block; padding:10px;"><a href="{{ group.get_absolute_url }}" title="{{ group.Title }}"><table border=0px style="width:220px; padding:0px; margins:0px; height:220px; text-align:center; vertical-align:middle;"><tr><td align="center" ><img border=0px src="{{ group.TitlePhoto.thumb_xl}}"/></td></tr></table><h2>{{ group.Title }}</h2></a></div>
     {% endfor %}
     {% for ps in object.PhotoSetElements.all %}
     <div style="float:left; display:block; padding:10px;"><a href="{{ ps.PageUrl }}" title="{{ ps.Title }}"><table border=0px style="position:relative; left:0px; top:0px; width:220px; height:220px; vertical-align:middle;"><tr><td align="center" ><img border=0px src="{{ ps.TitlePhoto.thumb_xl}}"/></td></tr></table><h2>{{ ps.Title }}</h2></a></div>

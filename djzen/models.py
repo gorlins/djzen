@@ -192,6 +192,7 @@ class GroupElement(GalleryElement):
     """
     class Meta:
         abstract = True
+        ordering = ['Title', 'Id']
     
     def ancestry(self):
         if self.ParentGroups.all():
@@ -232,6 +233,7 @@ class Group(GroupElement):
         #string PageUrl          // new in version v1.1
     }
     """
+
     def _addPhotoSet(self, ps, updateChildren=False, fullyLoaded=False):
         try:
             p = PhotoSet.objects.get(Id=ps.Id)
@@ -359,6 +361,8 @@ class PhotoSet(GroupElement):
         string PageUrl                  // new in version 1.1
     }
     """
+    
+        
     def update(self, psResponse=None, updateChildren=False, fullyLoaded=False):
         ps = None # Must load photos = psResponse
         zc = self.Owner.getConnection()
@@ -455,6 +459,9 @@ class Photo(GalleryElement):
                      ProfileRegular = 52,
                      )
     
+    class Meta:
+        ordering = ['TakenOn', 'FileName']
+        
     def imageUrl(self, size=None):
         """Calculates the url to any of the resized versions
         See: http://www.zenfolio.com/zf/help/api/guide/download
