@@ -312,6 +312,11 @@ class Group(GroupElement):
                                updateChildren=updateChildren,
                                fullyLoaded=fullyLoaded) for ps in psets]
         
+        for ps in self.PhotoSetElements.exclude(Id__in=[p.Id for p in psets]):
+            ps.delete()
+        for g in self.GroupElements.exclude(Id__in=[g.Id for g in groups]):
+            g.delete()
+            
         tp = g.TitlePhoto
         #synckwds.remove('TitlePhoto')
         try:
@@ -395,6 +400,10 @@ class PhotoSet(GroupElement):
             else:
                 photos = ps.Photos
             [self._addPhoto(p, updateChildren=updateChildren) for p in photos]
+            
+        # Remove unfound photos
+        for p in self.Photos.exclude(Id__in=[p.Id for p in photos]):
+            p.delete()
             
         tp = ps.TitlePhoto
         #synckwds.remove('TitlePhoto')
