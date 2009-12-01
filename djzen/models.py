@@ -218,6 +218,16 @@ class Group(GroupElement):
                                               **setByZen)
     # better separation this way anyways ;)
     
+    """If this Group object only contains a single PhotoSet with the same title
+    (and contains no child groups), the UI will try to flatten the tree 
+    structure by replacing this group with the photoset where (i.e., the
+    photoset will be listed in the parent's children instead of this group.  If 
+    these conditions are met this value is autoset to True during calls to 
+    self.update(), and setting back to False will prevent such behavior."""
+    FlattenMe = models.BooleanField(default=False, editable=True,
+                                  help_text="If True, the child PhotoSet will"+\
+                                  " be extracted")
+    
     """
     Group : GroupElement
     {
@@ -334,6 +344,13 @@ class Group(GroupElement):
                 ps.order_by('-Views')
                 self.TitlePhoto = ps[0]
                 
+            
+        if self.GroupElements.count() == 0 \
+           and self.PhotoSetElements.count()==1 \
+           and self.PhotoSetElements.all()[0].Title == self.Title:
+            self.FlattenMe = True
+        else:
+            self.FlattenMe = False
             
         self.save()
         
